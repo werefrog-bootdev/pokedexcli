@@ -18,15 +18,27 @@ func ensureClient(cfg *Config) {
 
 func fetchLocationAreas(cfg *Config, url string) (LocationAreasResponse, error) {
 	ensureClient(cfg)
-
 	if url == "" {
 		url = baseLocationArea
 	}
+
+	// 1) Try cache
+	if cfg.Cache != nil {
+		if b, ok := cfg.Cache.Get(url); ok {
+			var parsed LocationAreasResponse
+			if err := json.Unmarshal(b, &parsed); err == nil {
+				// fmt.Println("[cache] hit:", url)
+				return parsed, nil
+			}
+			// fall through on JSON error
+		}
+	}
+
+	// 2) Network request
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return LocationAreasResponse{}, err
 	}
-
 	resp, err := cfg.Client.Do(req)
 	if err != nil {
 		return LocationAreasResponse{}, err
@@ -40,6 +52,12 @@ func fetchLocationAreas(cfg *Config, url string) (LocationAreasResponse, error) 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return LocationAreasResponse{}, err
+	}
+
+	// 3) Cache response
+	if cfg.Cache != nil {
+		cfg.Cache.Add(url, body)
+		// fmt.Println("[cache] store:", url)
 	}
 
 	var parsed LocationAreasResponse

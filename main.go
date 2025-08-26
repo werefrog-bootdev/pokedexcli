@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
-)
+	"time"
 
-// ----- CLI plumbing -----
+	"github.com/werefrog-bootdev/pokedexcli/internal/pokecache"
+)
 
 type cliCommand struct {
 	name        string
@@ -20,7 +21,6 @@ func cleanInput(text string) []string {
 	return strings.Fields(text)
 }
 
-// Construit la map de commandes et câble help via une closure
 func getCommands(cfg *Config) map[string]cliCommand {
 	cmds := make(map[string]cliCommand)
 
@@ -33,33 +33,33 @@ func getCommands(cfg *Config) map[string]cliCommand {
 			return nil
 		},
 	}
-
 	cmds["map"] = cliCommand{
 		name:        "map",
 		description: "Show next 20 location-areas",
-		callback:    commandMap, // from commands_map.go
+		callback:    commandMap,
 	}
-
 	cmds["mapb"] = cliCommand{
 		name:        "mapb",
 		description: "Show previous 20 location-areas",
-		callback:    commandMapBack, // from commands_map.go
+		callback:    commandMapBack,
 	}
 
-	// help utilise makeHelpCommand (défini dans commands_map.go)
 	helpCb := makeHelpCommand(&cmds)
 	cmds["help"] = cliCommand{
 		name:        "help",
 		description: "Show available commands",
 		callback:    helpCb,
 	}
-
 	return cmds
 }
 
 func main() {
-	// Pagination state lives here
-	cfg := &Config{} // NextURL/PrevURL will be populated after first map call
+	cache := pokecache.NewCache(5 * time.Second)
+	defer cache.Close()
+
+	cfg := &Config{
+		Cache: cache,
+	}
 	commands := getCommands(cfg)
 
 	sc := bufio.NewScanner(os.Stdin)
@@ -69,21 +69,17 @@ func main() {
 			fmt.Println()
 			return
 		}
-
 		words := cleanInput(sc.Text())
 		if len(words) == 0 {
 			continue
 		}
-
-		cmdName := words[0]
-		args := words[1:]
+		cmdName, args := words[0], words[1:]
 
 		cmd, ok := commands[cmdName]
 		if !ok {
 			fmt.Println("Unknown command. Type 'help'.")
 			continue
 		}
-
 		if err := cmd.callback(cfg, args); err != nil {
 			fmt.Println("Error:", err)
 		}
