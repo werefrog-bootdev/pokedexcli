@@ -4,98 +4,88 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 )
 
-func cleanInput(text string) []string {
-	text = strings.TrimSpace(text)
-	text = strings.ToLower(text)
-	words := strings.Fields(text)
-	return words
-}
-
-func commandHelp() error {
-	fmt.Println("Welcome to the Pokedex!")
-	fmt.Println("Usage:")
-	fmt.Println()
-
-	// Build a stable order: "help" first, then alphabetical
-	names := make([]string, 0, len(commands))
-	for name := range commands {
-		names = append(names, name)
-	}
-	sort.Slice(names, func(i, j int) bool {
-		if names[i] == "help" && names[j] != "help" {
-			return true
-		}
-		if names[j] == "help" && names[i] != "help" {
-			return false
-		}
-		return names[i] < names[j]
-	})
-
-	for _, name := range names {
-		cmd := commands[name]
-		fmt.Printf("%s: %s\n", cmd.name, cmd.description)
-	}
-	return nil
-}
-
-func commandExit() error {
-	fmt.Println("Closing the Pokedex... Goodbye!")
-	os.Exit(0)
-	return nil
-}
+// ----- CLI plumbing -----
 
 type cliCommand struct {
 	name        string
 	description string
-	callback    func() error
+	callback    func(*Config, []string) error
 }
 
-// Declare first (no init expression referencing commandHelp)
-var commands map[string]cliCommand
+func cleanInput(text string) []string {
+	text = strings.TrimSpace(strings.ToLower(text))
+	return strings.Fields(text)
+}
 
-// Populate later to avoid the init cycle
-func init() {
-	commands = map[string]cliCommand{
-		"exit": {
-			name:        "exit",
-			description: "Exit the Pokedex",
-			callback:    commandExit,
-		},
-		"help": {
-			name:        "help",
-			description: "Displays a help message",
-			callback:    commandHelp,
+// Construit la map de commandes et câble help via une closure
+func getCommands(cfg *Config) map[string]cliCommand {
+	cmds := make(map[string]cliCommand)
+
+	cmds["exit"] = cliCommand{
+		name:        "exit",
+		description: "Exit the Pokedex",
+		callback: func(_ *Config, _ []string) error {
+			fmt.Println("Closing the Pokedex... Goodbye!")
+			os.Exit(0)
+			return nil
 		},
 	}
+
+	cmds["map"] = cliCommand{
+		name:        "map",
+		description: "Show next 20 location-areas",
+		callback:    commandMap, // from commands_map.go
+	}
+
+	cmds["mapb"] = cliCommand{
+		name:        "mapb",
+		description: "Show previous 20 location-areas",
+		callback:    commandMapBack, // from commands_map.go
+	}
+
+	// help utilise makeHelpCommand (défini dans commands_map.go)
+	helpCb := makeHelpCommand(&cmds)
+	cmds["help"] = cliCommand{
+		name:        "help",
+		description: "Show available commands",
+		callback:    helpCb,
+	}
+
+	return cmds
 }
 
 func main() {
-	scanner := bufio.NewScanner(os.Stdin)
+	// Pagination state lives here
+	cfg := &Config{} // NextURL/PrevURL will be populated after first map call
+	commands := getCommands(cfg)
 
+	sc := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print("Pokedex > ")
-
-		if !scanner.Scan() {
+		if !sc.Scan() {
 			fmt.Println()
 			return
 		}
 
-		words := cleanInput(scanner.Text())
+		words := cleanInput(sc.Text())
 		if len(words) == 0 {
 			continue
 		}
 
-		if cmd, ok := commands[words[0]]; ok {
-			if err := cmd.callback(); err != nil {
-				fmt.Println("Error:", err)
-			}
+		cmdName := words[0]
+		args := words[1:]
+
+		cmd, ok := commands[cmdName]
+		if !ok {
+			fmt.Println("Unknown command. Type 'help'.")
 			continue
 		}
 
-		fmt.Println("Unknown command")
+		if err := cmd.callback(cfg, args); err != nil {
+			fmt.Println("Error:", err)
+		}
 	}
 }
